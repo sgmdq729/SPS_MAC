@@ -7,25 +7,26 @@
 #include <numeric>
 #include <unordered_map>
 #include <algorithm>
+#include <map>
 #include <set>
 #include "Vehicle.h"
 #include "Logger.h"
 //#define CON_COL
 //#define LOG
-#define PROPOSAL
+//#define PROPOSAL
 
 #ifdef LOG
 Logger logger;
 #endif
 
-
-
 using namespace std;
 
-int subframe = 0;				//1ms単位のシミュレーション時刻
-constexpr int sensingWindow = 100;		//初期状態で送信タイミングを決定する範囲
-constexpr int txSubCHLength = 1;			//送信に使用するサブチャネル数(全車両共通)
-constexpr int numSubCH = 2;				//総サブチャネル数
+const int RRI = 100;
+const int SENSING_WINDOW = 1000;			//初期状態で送信タイミングを決定する範囲
+int NUM_SUBCH;
+double PROB_RESOURCE_KEEP;
+const int T1 = 1;					//選択ウィンドウT1
+const int T2 = 100;					//選択ウィンドウT2
 
 struct HashPair {
 	template <class T1, class T2>
@@ -44,26 +45,32 @@ int main() {
 	constexpr int warmupTime = 1500;			//から回し時間
 	constexpr int simTime = (100 * 100) + warmupTime;			//全体のシミュレーション時間(ms)
 
-	constexpr int minVehicle = 50;			//最小車両数
+	constexpr int minVehicle = 50;		//最小車両数
 	constexpr int maxVehicle = 200;		//最大車両数
-	constexpr int numTrial = 100;					//各車両数での試行回数
+	constexpr int numTrial = 1000;		//各車両数での試行回数
 
-	constexpr int T1 = 1;						//選択ウィンドウT1
-	constexpr int T2 = 100;					//選択ウィンドウT2
 
-	int timeGap = 0;				//nextEventまでの差
-	int nextEventSubframe;			//次のイベントのシミュレーション時刻
-	vector<Vehicle*> vehicleList;			//車両を格納するvector
-	vector<vector<int>> sensingList(sensingWindow + 1, vector<int>(numSubCH, 0));		//更新した送信リソース
 
+	int subframe = 0;					//1ms単位のシミュレーション時刻
+	int timeGap = 0;					//nextEventまでの差
+	int nextEventSubframe;				//次のイベントのシミュレーション時刻
+
+	cout << "SPS simulator" << endl;
+	cout << "######<intput parameter>######" << endl;
+	cout << "reselection probability << "; cin >> PROB_RESOURCE_KEEP;
+	cout << "number of subCH << "; cin >> NUM_SUBCH;
+
+	vector<Vehicle*> vehicleList;		//車両を格納するvector
+	vector<vector<int>> sensingList(SENSING_WINDOW + 1, vector<int>(NUM_SUBCH, 0));		//センシングリスト
 
 	//実行時間関係の設定
 	chrono::system_clock::time_point mstart, mend;
 	mstart = chrono::system_clock::now();
+
 #ifdef PROPOSAL
-	ofstream output("p0_p.csv");
+	ofstream output("p" + to_string((int)(PROB_RESOURCE_KEEP * 10)) + "_" + to_string(NUM_SUBCH) + "ch_proposal.csv");
 #else
-	ofstream output("p0.csv");
+	ofstream output("p" + to_string((int)(PROB_RESOURCE_KEEP * 10)) + "_" + to_string(NUM_SUBCH) + "ch.csv");
 #endif // PROPOSAL
 
 
@@ -71,14 +78,11 @@ int main() {
 	//車両数のループ
 	for (int numVehicle = minVehicle; numVehicle <= maxVehicle; numVehicle += 25) {
 		cout << numVehicle << endl;
-		int sendCounter = 0;
-		int collisionCounter = 0;
-		map<int, int> resultContinuous;
-		map<int, int> resultColVehicles;
-		int initCollisionCounter = 0;
-		int reselectionAndCollisionCounter = 0;
-		int noReselectionAndCollisionCounter = 0;
+		int sendCounter = 0;						//送信したパケット数
+		int collisionCounter = 0;					//衝突したパケット数
 
+		map<int, int> resultContinuous;				
+		map<int, int> resultColVehicles;
 
 		//試行回数分ループ
 		for (int trial = 0; trial < numTrial; trial++) {
@@ -89,7 +93,7 @@ int main() {
 
 			//車両インスタンスの生成
 			for (int i = 0; i < numVehicle; i++) {
-				vehicleList.emplace_back(new Vehicle(i, numSubCH, txSubCHLength));
+				vehicleList.emplace_back(new Vehicle(i));
 			}
 
 			//subframeのループ，直近の送信予定subframeまで進める
@@ -101,16 +105,14 @@ int main() {
 
 				//subCH毎に送信を行う車両のidを格納
 				vector<Vehicle*> txVehicles;
-				vector<vector<Vehicle*>> txVehiclesPerSubCH(numSubCH, vector<Vehicle*>());
+				vector<vector<Vehicle*>> txVehiclesPerSubCH(NUM_SUBCH, vector<Vehicle*>());
 
 
 				if (subframe != 0) {
-
 					//sensingList更新
 					sensingList.assign(sensingList.begin() + timeGap, sensingList.end());
-					int gapSize = sensingWindow - sensingList.size() + 1;
-					sensingList.insert(sensingList.end(), gapSize, vector<int>(numSubCH, 0));
-
+					int gapSize = SENSING_WINDOW - sensingList.size() + 1;
+					sensingList.insert(sensingList.end(), gapSize, vector<int>(NUM_SUBCH, 0));
 				}
 
 				//送信を行う車両の動作
@@ -125,7 +127,7 @@ int main() {
 
 						//送信に使用したサブチャネルをマーク
 							//sensingListの最後尾が現時刻のsubframeなのでsensingWindow番目に記録
-						sensingList[sensingWindow][vehicle->getTxResourceLocation().second] = 1;
+						sensingList[SENSING_WINDOW][vehicle->getTxResourceLocation().second] = 1;
 
 						//RCの減算
 						vehicle->decrementRC();
@@ -256,14 +258,13 @@ int main() {
 			}
 
 			//車両インスタンスの削除
-			for (Vehicle*& vehicle : vehicleList) {
+			for (Vehicle* vehicle : vehicleList) {
 				delete vehicle;
 			}
+			vehicleList.clear();
 #ifdef LOG
 			logger.writeTerm();
 #endif
-			vector<Vehicle*>().swap(vehicleList);
-			collisionPairs.clear();
 		}
 
 		output << numVehicle << "," << (double)collisionCounter / (double)sendCounter << endl;
