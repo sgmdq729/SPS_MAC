@@ -79,7 +79,7 @@ public:
 		prePreLocation = previousLocation;
 		previousLocation = txResourceLocation;
 
-		multimap<int, pair<int, int>, greater<int>> map;
+		multimap<int, pair<int, int>> map;
 
 		//probResouceKeep‚Ì”»’è
 		if (distResourceKeep(engine) > PROB_RESOURCE_KEEP) {
@@ -100,11 +100,11 @@ public:
 			distSB.param(paramSB);
 			auto nextResouceLocation = next(map.begin(), distSB(engine));
 
-			txResourceLocation.first = nextResouceLocation->second.first + subframe + 1;
+			txResourceLocation.first = nextResouceLocation->second.first + subframe;
 			txResourceLocation.second = nextResouceLocation->second.second;
 			SB.clear();
 
-				//probResouceKeep‚Ì”»’è
+		//probResouceKeep‚Ì”»’è
 		//if (distResourceKeep(engine) > PROB_RESOURCE_KEEP) {
 		//	isReselection = true;
 		//	for (auto itr_subFrame = sensingList.begin() + 1; itr_subFrame != sensingList.end() - 1; itr_subFrame++) {
